@@ -39,7 +39,7 @@ def matematiksel_model_veri_uretiyor(yogunluk, porozite):
     tebd = (tebd_yogunluk + tebd_porozite) / 2
     dinamik_modul = dinamik_modul_porozite
     
-    statik_elastisite = dinamik_modul * 0.15 
+    statik_elastisite = dinamul_modul * 0.15 if 'dinamul_modul' in locals() else dinamik_modul * 0.15
     dinamik_poisson = 0.24
     
     return [p_hizi, s_hizi, statik_elastisite, tebd, dinamik_poisson, dinamik_modul]
@@ -49,8 +49,9 @@ dosya_adi = "verriler.txt"
 if not os.path.exists(dosya_adi):
     st.error(f"Veri dosyası ({dosya_adi}) bulunamadı! Lütfen bu Python koduyla aynı klasörde olduğundan emin olun.")
 else:
-    # Dosyayı okuyoruz
+    # Dosyayı okuyoruz ve sütun adlarındaki ekstra tırnak işaretlerini veya boşlukları temizliyoruz
     df_lab = pd.read_csv(dosya_adi)
+    df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
     if 'trained_model' not in st.session_state:
         st.session_state.trained_model = None
