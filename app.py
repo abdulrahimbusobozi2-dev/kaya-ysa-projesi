@@ -67,7 +67,6 @@ else:
         sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin?", min_value=10, max_value=500, value=100)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
-            # Sütun isimleri yeni düzgün txt dosyanla harfiyen eşitlendi
             X_list = list(df_lab[['Yogunluk', 'Porozite']].values)
             y_list = list(df_lab[['P_Hizi', 'S_Hizi', 'Statik_Elastisite', 'TEBD', 'Dinamik_Poisson', 'Dinamik_Elastisite']].values)
             
@@ -131,4 +130,4 @@ else:
                 out4, out5, out6 = st.columns(3)
                 out4.success(f"**TEBD (UCS):** {tahmin[3]:.2f} MPa")
                 out5.success(f"**Dinamik Poisson:** {tahmin[4]:.4f}")
-                out6.success(f"**Dinamik Elastisite Modülü:** {tahmin[5]:.2f} MPa")s
+                out6.success(f"**Dinamik Elastisite Modülü:** {tahmin[5]:.2f} MPa")
