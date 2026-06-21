@@ -23,7 +23,7 @@ st.set_page_config(page_title="YSA Kayaç Modelleme", layout="wide")
 st.title("🌋 Kayaç Özellikleri ve Dalga Yayılımı Tahminleme Aracı")
 st.write("Dokuz Eylül Üniversitesi - Maden Mühendisliği Bölümü Bitirme Projesi")
 
-# --- MATEMATİKSEL FORMÜLLERİNİZ ---
+# --- POLİNOMSAL MATEMATİKSEL MODELLERİNİZ ---
 def matematiksel_model_veri_uretiyor(yogunluk, porozite):
     p_hizi_yogunluk = (11086 * (yogunluk**2)) - (60952 * yogunluk) + 86489
     s_hizi_yogunluk = (9087.6 * (yogunluk**2)) - (50269 * yogunluk) + 71034
@@ -39,7 +39,7 @@ def matematiksel_model_veri_uretiyor(yogunluk, porozite):
     tebd = (tebd_yogunluk + tebd_porozite) / 2
     dinamik_modul = dinamik_modul_porozite
     
-    statik_elastisite = dinamul_modul * 0.15 if 'dinamul_modul' in locals() else dinamik_modul * 0.15
+    statik_elastisite = dinamik_modul * 0.15 
     dinamik_poisson = 0.24
     
     return [p_hizi, s_hizi, statik_elastisite, tebd, dinamik_poisson, dinamik_modul]
@@ -49,7 +49,7 @@ dosya_adi = "verriler.txt"
 if not os.path.exists(dosya_adi):
     st.error(f"Veri dosyası ({dosya_adi}) bulunamadı! Lütfen bu Python koduyla aynı klasörde olduğundan emin olun.")
 else:
-    # Dosyayı okuyoruz ve sütun adlarındaki ekstra tırnak işaretlerini veya boşlukları temizliyoruz
+    # Dosyayı okuyoruz ve tırnakları temizliyoruz
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
@@ -65,7 +65,8 @@ else:
         st.write("`verriler.txt` dosyasından okunan güncel laboratuvar verileriniz:")
         st.dataframe(df_lab)
         
-        sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin?", min_value=10, max_value=500, value=100)
+        # Kullanıcıyı yönlendirmek için varsayılan sentetik adet değerini 50 yaptık
+        sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin? (Öneri: 40-80 arası)", min_value=0, max_value=500, value=50)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
             X_list = list(df_lab[['Yogunluk', 'Porozite']].values)
@@ -87,7 +88,8 @@ else:
             X_scaled = scaler_X.fit_transform(X_all)
             y_scaled = scaler_y.fit_transform(y_all)
             
-            model = MLPRegressor(hidden_layer_sizes=(12, 8), activation='tanh', solver='lbfgs', max_iter=4000, random_state=42)
+            # --- POLİNOMSAL MODELLER İÇİN DERİNLEŞTİRİLMİŞ YSA MİMARİSİ ---
+            model = MLPRegressor(hidden_layer_sizes=(64, 32, 16), activation='tanh', solver='lbfgs', max_iter=5000, random_state=42)
             model.fit(X_scaled, y_scaled)
             
             st.session_state.trained_model = model
