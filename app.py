@@ -1,5 +1,6 @@
 import os
 import sys
+import pickle  # --- MODELİ SABİTLEMEK İÇİN GEREKLİ ---
 
 # --- BULUT SUNUCUSU İÇİN OTOMATİK KÜTÜPHANE YÜKLEME SİHİRBAZI ---
 try:
@@ -45,42 +46,46 @@ def matematiksel_model_veri_uretiyor(yogunluk, porozite):
     return [p_hizi, s_hizi, statik_elastisite, tebd, dinamik_poisson, dinamik_modul]
 
 dosya_adi = "verriler.txt"
+model_dosya_adi = "egitilmis_model.pkl"  # Sabit model dosyası
 
 if not os.path.exists(dosya_adi):
-    st.error(f"Veri dosyası ({dosya_adi}) bulunamadı! Lütfen bu Python koduyla aynı klasörde olduğundan emin olun.")
+    st.error(f"Veri dosyası ({dosya_adi}) bulunamadı!")
 else:
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
     min_yeg, max_yeg = float(df_lab['Yogunluk'].min()), float(df_lab['Yogunluk'].max())
     min_por, max_por = float(df_lab['Porozite'].min()), float(df_lab['Porozite'].max())
-    min_tebd, max_tebd = float(df_lab['TEBD'].min()), float(df_lab['TEBD'].max())
 
-    if 'trained_model' not in st.session_state:
-        st.session_state.trained_model = None
-        st.session_state.scaler_X = None
-        st.session_state.scaler_y = None
+    # --- EĞER ÖNCEDEN KAYDEDİLMİŞ MODEL VARSA OTOMATİK YÜKLE ---
+    if os.path.exists(model_dosya_adi) and 'trained_model' not in st.session_state:
+        with open(model_dosya_adi, 'rb') as f:
+            kayitli_data = pickle.load(f)
+            st.session_state.trained_model = kayitli_data['model']
+            st.session_state.scaler_X = kayitli_data['scaler_X']
+            st.session_state.scaler_y = kayitli_data['scaler_y']
 
     islem = st.sidebar.radio("İşlem Adımı Seçin:", ["1. Veri Havuzu ve YSA Eğitimi", "2. Eğitilen Ağ ile Tahmin Yap"])
 
     if islem == "1. Veri Havuzu ve YSA Eğitimi":
         st.header("🤖 Verileri Birleştirme (3 Girdi) ve Yapay Sinir Ağını Eğitme")
-        st.write("`verriler.txt` dosyasından okunan güncel veri havuzunuz:")
+        if os.path.exists(model_dosya_adi):
+            st.info("💡 Sistemde kayıtlı bir model dosyası zaten var. Yeniden eğitirseniz üzerine yazılacaktır.")
+            
         st.dataframe(df_lab)
-        
         sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin?", min_value=0, max_value=500, value=100)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
             X_list = list(df_lab[['Yogunluk', 'Porozite', 'TEBD']].values)
-            # YSA sadece P_Hizi ve S_Hizi parametrelerini tahmin etmek üzere odaklanıyor
             y_list = list(df_lab[['P_Hizi', 'S_Hizi']].values)
             
+            # Rastgeleliği tam sabitlemek için numpy ve random seed'leri zorluyoruz
             np.random.seed(42)
+            
             for _ in range(sentetik_adet):
                 rastgele_yogunluk = np.random.uniform(min_yeg, max_yeg)
                 rastgele_porozite = np.random.uniform(min_por, max_por)
                 hesaplanan_cikti = matematiksel_model_veri_uretiyor(rastgele_yogunluk, rastgele_porozite)
-                
                 X_list.append([rastgele_yogunluk, rastgele_porozite, hesaplanan_cikti[3]])
                 y_list.append([hesaplanan_cikti[0], hesaplanan_cikti[1]])
                 
@@ -98,11 +103,14 @@ else:
             st.session_state.scaler_X = scaler_X
             st.session_state.scaler_y = scaler_y
             
-            st.success(f"🎉 Başarılı! Hız odaklı YSA modeli eğitildi.")
+            # --- MODELİ DOSYAYA KAYDET ---
+            with open(model_dosya_adi, 'wb') as f:
+                pickle.dump({'model': model, 'scaler_X': scaler_X, 'scaler_y': scaler_y}, f)
+                
+            st.success(f"🎉 Başarılı! Model eğitildi ve '{model_dosya_adi}' olarak kaydedildi.")
             
             y_pred = scaler_y.inverse_transform(model.predict(X_scaled))
             param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)']
-            
             cols = st.columns(2)
             for i, ad in enumerate(param_isimleri):
                 r2 = r2_score(y_all[:, i], y_pred[:, i])
@@ -112,7 +120,7 @@ else:
         st.header("🔮 3 Girdiye Göre Kalan Tüm Mekanik Özellikleri Tahmin Etme")
         
         if st.session_state.trained_model is None:
-            st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin!")
+            st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin veya klasörde model dosyası bulundurun!")
         else:
             col_in1, col_in2, col_in3 = st.columns(3)
             with col_in1:
@@ -130,22 +138,18 @@ else:
                 
                 v_p = max(500.0, tahmin[0])
                 v_s = max(300.0, tahmin[1])
-                rho = g_yeg * 1000.0 # g/cm3 -> kg/m3 dönüşümü
+                rho = g_yeg * 1000.0
                 
-                # --- FİZİKSEL FORMÜLLERLE MODÜL HESAPLAMALARI ---
-                # Dinamik Poisson Oranı formülü
                 if (v_p**2 - 2 * v_s**2) != 0 and (2 * (v_p**2 - v_s**2)) != 0:
                     d_poisson = (v_p**2 - 2 * v_s**2) / (2 * (v_p**2 - v_s**2))
                 else:
                     d_poisson = 0.25
                 d_poisson = np.clip(d_poisson, 0.05, 0.45)
                 
-                # Dinamik Elastisite Modülü formülü (Pa cinsinden hesaplayıp MPa'ya çeviriyoruz)
                 d_elastisite = (rho * (v_s**2) * (3 * (v_p**2) - 4 * (v_s**2))) / (v_p**2 - v_s**2) / 1000000.0
                 if d_elastisite <= 0 or np.isnan(d_elastisite):
-                    d_elastisite = (rho * v_p**2 * 1000000.0) / 1000000.0 * 0.1 # Fallback
+                    d_elastisite = (rho * v_p**2 * 1000000.0) / 1000000.0 * 0.1
                 
-                # Statik Elastisite Modülü bağıntısı
                 s_elastisite = d_elastisite * 0.15
                 
                 out1, out2 = st.columns(2)
