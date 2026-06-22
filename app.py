@@ -52,9 +52,9 @@ else:
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
-    # Laboratuvar verilerinin sınırlarını net olarak hafızaya alıyoruz
-    min_yeg, max_yeg = df_lab['Yogunluk'].min(), df_lab['Yogunluk'].max()
-    min_por, max_por = df_lab['Porozite'].min(), df_lab['Porozite'].max()
+    # Gerçek laboratuvar sınırları
+    min_yeg, max_yeg = float(df_lab['Yogunluk'].min()), float(df_lab['Yogunluk'].max())
+    min_por, max_por = float(df_lab['Porozite'].min()), float(df_lab['Porozite'].max())
 
     if 'trained_model' not in st.session_state:
         st.session_state.trained_model = None
@@ -113,6 +113,9 @@ else:
         if st.session_state.trained_model is None:
             st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin!")
         else:
+            # Kullanıcıya güvenli aralığı gösteriyoruz
+            st.info(f"💡 Lütfen sadece laboratuvar güvenli aralığında değerler girin: **Yoğunluk ({min_yeg} - {max_yeg})**, **Porozite ({min_por} - {max_por})**")
+            
             col_in1, col_in2 = st.columns(2)
             with col_in1:
                 g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=2.72, format="%.4f")
@@ -120,24 +123,22 @@ else:
                 g_por = st.number_input("Porozite Değeri girin (%):", value=11.50, format="%.2f")
                 
             if st.button("Yapay Zekadan Çıktıları Al"):
-                # 🔥 AKILLI SINIR KORUMASI: Girdi laboratuvar dışındaysa, değerleri saçmalatmadan en yakın sınıra sabitler
-                klip_yeg = np.clip(g_yeg, min_yeg, max_yeg)
-                klip_por = np.clip(g_por, min_por, max_por)
-                
-                if g_yeg != klip_yeg or g_por != klip_por:
-                    st.toast(f"ℹ️ Girdiler güvenli laboratuvar aralığına ({min_yeg}-{max_yeg} g/cm³, %{min_por}-%{max_por}) sabitlenerek tahmin yapıldı.")
-                
-                girdi = np.array([[klip_yeg, klip_por]])
-                girdi_s = st.session_state.scaler_X.transform(girdi)
-                tahmin_s = st.session_state.trained_model.predict(girdi_s)
-                tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
-                
-                out1, out2, out3 = st.columns(3)
-                out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
-                out2.info(f"**S Hızı:** {tahmin[1]:.2f} m/s")
-                out3.info(f"**Statik Elastisite Modülü:** {tahmin[2]:.2f} MPa")
-                
-                out4, out5, out6 = st.columns(3)
-                out4.success(f"**TEBD (UCS):** {tahmin[3]:.2f} MPa")
-                out5.success(f"**Dinamik Poisson:** {tahmin[4]:.4f}")
-                out6.success(f"**Dinamik Elastisite Modülü:** {tahmin[5]:.2f} MPa")
+                # 🔥 GÜVENLİK DUVARI KONTROLÜ
+                if (g_yeg < min_yeg or g_yeg > max_yeg) or (g_por < min_por or g_por > max_por):
+                    st.error(f"🚨 Hata! Girilen değerler laboratuvar veri sınırlarının dışındadır. Fiziksel olarak mantıklı tahminler üretebilmek için lütfen Yoğunluğu {min_yeg}-{max_yeg} arası, Poroziteyi %{min_por}-%{max_por} arası giriniz.")
+                else:
+                    # Değerler içerideyse yüksek başarılı yapay zekâ tahmini devrede
+                    girdi = np.array([[g_yeg, g_por]])
+                    girdi_s = st.session_state.scaler_X.transform(girdi)
+                    tahmin_s = st.session_state.trained_model.predict(girdi_s)
+                    tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
+                    
+                    out1, out2, out3 = st.columns(3)
+                    out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
+                    out2.info(f"**S Hızı:** {tahmin[1]:.2f} m/s")
+                    out3.info(f"**Statik Elastisite Modülü:** {tahmin[2]:.2f} MPa")
+                    
+                    out4, out5, out6 = st.columns(3)
+                    out4.success(f"**TEBD (UCS):** {tahmin[3]:.2f} MPa")
+                    out5.success(f"**Dinamik Poisson:** {tahmin[4]:.4f}")
+                    out6.success(f"**Dinamik Elastisite Modülü:** {tahmin[5]:.2f} MPa")
