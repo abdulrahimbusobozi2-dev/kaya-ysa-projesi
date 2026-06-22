@@ -6,14 +6,14 @@ try:
     import pandas as pd
     import numpy as np
     from sklearn.neural_network import MLPRegressor
-    from sklearn.preprocessing import StandardScaler  # Sınırları kaldırmak için StandardScaler'a geçtik
+    from sklearn.preprocessing import MinMaxScaler
     from sklearn.metrics import r2_score
 except ModuleNotFoundError:
     os.system(f'"{sys.executable}" -m pip install pandas scikit-learn numpy')
     import pandas as pd
     import numpy as np
     from sklearn.neural_network import MLPRegressor
-    from sklearn.preprocessing import StandardScaler
+    from sklearn.preprocessing import MinMaxScaler
     from sklearn.metrics import r2_score
 
 import streamlit as st
@@ -52,6 +52,10 @@ else:
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
+    # Laboratuvar verilerinin sınırlarını hafızaya alıyoruz
+    min_yeg, max_yeg = df_lab['Yogunluk'].min(), df_lab['Yogunluk'].max()
+    min_por, max_por = df_lab['Porozite'].min(), df_lab['Porozite'].max()
+
     if 'trained_model' not in st.session_state:
         st.session_state.trained_model = None
         st.session_state.scaler_X = None
@@ -64,7 +68,7 @@ else:
         st.write("`verriler.txt` dosyasından okunan güncel laboratuvar verileriniz:")
         st.dataframe(df_lab)
         
-        sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin? (Öneri: 100)", min_value=0, max_value=500, value=100)
+        sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin?", min_value=0, max_value=500, value=100)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
             X_list = list(df_lab[['Yogunluk', 'Porozite']].values)
@@ -72,8 +76,8 @@ else:
             
             np.random.seed(42)
             for _ in range(sentetik_adet):
-                rastgele_yogunluk = np.random.uniform(df_lab['Yogunluk'].min(), df_lab['Yogunluk'].max())
-                rastgele_porozite = np.random.uniform(df_lab['Porozite'].min(), df_lab['Porozite'].max())
+                rastgele_yogunluk = np.random.uniform(min_yeg, max_yeg)
+                rastgele_porozite = np.random.uniform(min_por, max_por)
                 
                 hesaplanan_cikti = matematiksel_model_veri_uretiyor(rastgele_yogunluk, rastgele_porozite)
                 X_list.append([rastgele_yogunluk, rastgele_porozite])
@@ -82,20 +86,20 @@ else:
             X_all = np.array(X_list)
             y_all = np.array(y_list)
             
-            # Sınırları kaldıran standart sapma bazlı ölçekleyici
-            scaler_X, scaler_y = StandardScaler(), StandardScaler()
+            # Kararlı çalışan MinMaxScaler'a geri döndük
+            scaler_X, scaler_y = MinMaxScaler(), MinMaxScaler()
             X_scaled = scaler_X.fit_transform(X_all)
             y_scaled = scaler_y.fit_transform(y_all)
             
-            # Aktivasyon fonksiyonunu 'relu' yaparak ucu açık trend takibi sağladık
-            model = MLPRegressor(hidden_layer_sizes=(64, 32, 16), activation='relu', solver='lbfgs', max_iter=5000, random_state=42)
+            # Başarısı kanıtlanmış mimari
+            model = MLPRegressor(hidden_layer_sizes=(64, 32, 16), activation='tanh', solver='lbfgs', max_iter=5000, random_state=42)
             model.fit(X_scaled, y_scaled)
             
             st.session_state.trained_model = model
             st.session_state.scaler_X = scaler_X
             st.session_state.scaler_y = scaler_y
             
-            st.success(f"🎉 Başarılı! Sınırları aşabilen (Extrapolation özellikli) YSA modeli eğitildi.")
+            st.success(f"🎉 Başarılı! En yüksek kararlılıkta YSA modeli eğitildi.")
             
             y_pred = scaler_y.inverse_transform(model.predict(X_scaled))
             param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)', 'Statik Elastisite (MPa)', 'TEBD (MPa)', 'Dinamik Poisson', 'Dinamik Elastisite (MPa)']
@@ -106,24 +110,28 @@ else:
                 cols[i].metric(label=ad, value=f"R²: {r2:.4f}")
 
     elif islem == "2. Eğitilen Ağ ile Tahmin Yap":
-        st.header("🔮 Girdilere Göre Geri Kalan Tüm Verileri Tahmin Etme (Sonsuz Aralık Modu)")
+        st.header("🔮 Girdilere Göre Geri Kalan Tüm Verileri Tahmin Etme")
         
         if st.session_state.trained_model is None:
             st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin!")
         else:
             col_in1, col_in2 = st.columns(2)
             with col_in1:
-                # Sınır dışı değer girişine izin vermek için min/max sınırlarını kaldırdık
-                g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=3.20, format="%.4f")
+                g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=2.72, format="%.4f")
             with col_in2:
-                g_por = st.number_input("Porozite Değeri girin (%):", value=0.10, format="%.2f")
+                g_por = st.number_input("Porozite Değeri girin (%):", value=11.50, format="%.2f")
                 
             if st.button("Yapay Zekadan Çıktıları Al"):
-                girdi = np.array([[g_yeg, g_por]])
-                girdi_s = st.session_state.scaler_X.transform(girdi)
-                
-                tahmin_s = st.session_state.trained_model.predict(girdi_s)
-                tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
+                # AKILLI HİBRİT KONTROL: Değerler laboratuvar sınırları dışındaysa ampirik formül koruması tetiklenir
+                if (g_yeg < min_yeg or g_yeg > max_yeg) or (g_por < min_por or g_por > max_por):
+                    st.toast("ℹ️ Girdi değerleri laboratuvar aralığının dışında. Polinomsal matematiksel model aktif edildi.")
+                    tahmin = matematiksel_model_veri_uretiyor(g_yeg, g_por)
+                else:
+                    # Değerler içerideyse yüksek başarılı yapay zekâ tahmini devrede
+                    girdi = np.array([[g_yeg, g_por]])
+                    girdi_s = st.session_state.scaler_X.transform(girdi)
+                    tahmin_s = st.session_state.trained_model.predict(girdi_s)
+                    tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
                 
                 out1, out2, out3 = st.columns(3)
                 out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
