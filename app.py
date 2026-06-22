@@ -6,14 +6,14 @@ try:
     import pandas as pd
     import numpy as np
     from sklearn.neural_network import MLPRegressor
-    from sklearn.preprocessing import MinMaxScaler
+    from sklearn.preprocessing import StandardScaler  # Sınırları kaldırmak için StandardScaler'a geçtik
     from sklearn.metrics import r2_score
 except ModuleNotFoundError:
     os.system(f'"{sys.executable}" -m pip install pandas scikit-learn numpy')
     import pandas as pd
     import numpy as np
     from sklearn.neural_network import MLPRegressor
-    from sklearn.preprocessing import MinMaxScaler
+    from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import r2_score
 
 import streamlit as st
@@ -49,7 +49,6 @@ dosya_adi = "verriler.txt"
 if not os.path.exists(dosya_adi):
     st.error(f"Veri dosyası ({dosya_adi}) bulunamadı! Lütfen bu Python koduyla aynı klasörde olduğundan emin olun.")
 else:
-    # Dosyayı okuyoruz ve tırnakları temizliyoruz
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
@@ -65,8 +64,7 @@ else:
         st.write("`verriler.txt` dosyasından okunan güncel laboratuvar verileriniz:")
         st.dataframe(df_lab)
         
-        # Kullanıcıyı yönlendirmek için varsayılan sentetik adet değerini 50 yaptık
-        sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin? (Öneri: 40-80 arası)", min_value=0, max_value=500, value=50)
+        sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin? (Öneri: 100)", min_value=0, max_value=500, value=100)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
             X_list = list(df_lab[['Yogunluk', 'Porozite']].values)
@@ -84,19 +82,20 @@ else:
             X_all = np.array(X_list)
             y_all = np.array(y_list)
             
-            scaler_X, scaler_y = MinMaxScaler(), MinMaxScaler()
+            # Sınırları kaldıran standart sapma bazlı ölçekleyici
+            scaler_X, scaler_y = StandardScaler(), StandardScaler()
             X_scaled = scaler_X.fit_transform(X_all)
             y_scaled = scaler_y.fit_transform(y_all)
             
-            # --- POLİNOMSAL MODELLER İÇİN DERİNLEŞTİRİLMİŞ YSA MİMARİSİ ---
-            model = MLPRegressor(hidden_layer_sizes=(64, 32, 16), activation='tanh', solver='lbfgs', max_iter=5000, random_state=42)
+            # Aktivasyon fonksiyonunu 'relu' yaparak ucu açık trend takibi sağladık
+            model = MLPRegressor(hidden_layer_sizes=(64, 32, 16), activation='relu', solver='lbfgs', max_iter=5000, random_state=42)
             model.fit(X_scaled, y_scaled)
             
             st.session_state.trained_model = model
             st.session_state.scaler_X = scaler_X
             st.session_state.scaler_y = scaler_y
             
-            st.success(f"🎉 Başarılı! Toplam {len(df_lab)} gerçek ve {sentetik_adet} ek ampirik veriyle YSA modeli eğitildi.")
+            st.success(f"🎉 Başarılı! Sınırları aşabilen (Extrapolation özellikli) YSA modeli eğitildi.")
             
             y_pred = scaler_y.inverse_transform(model.predict(X_scaled))
             param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)', 'Statik Elastisite (MPa)', 'TEBD (MPa)', 'Dinamik Poisson', 'Dinamik Elastisite (MPa)']
@@ -107,16 +106,17 @@ else:
                 cols[i].metric(label=ad, value=f"R²: {r2:.4f}")
 
     elif islem == "2. Eğitilen Ağ ile Tahmin Yap":
-        st.header("🔮 Girdilere Göre Geri Kalan Tüm Verileri Tahmin Etme")
+        st.header("🔮 Girdilere Göre Geri Kalan Tüm Verileri Tahmin Etme (Sonsuz Aralık Modu)")
         
         if st.session_state.trained_model is None:
             st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin!")
         else:
             col_in1, col_in2 = st.columns(2)
             with col_in1:
-                g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=2.72, format="%.4f")
+                # Sınır dışı değer girişine izin vermek için min/max sınırlarını kaldırdık
+                g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=3.20, format="%.4f")
             with col_in2:
-                g_por = st.number_input("Porozite Değeri girin (%):", value=11.50, format="%.2f")
+                g_por = st.number_input("Porozite Değeri girin (%):", value=0.10, format="%.2f")
                 
             if st.button("Yapay Zekadan Çıktıları Al"):
                 girdi = np.array([[g_yeg, g_por]])
