@@ -52,7 +52,6 @@ else:
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
-    # Gerçek laboratuvar sınırları (Sadece bilgilendirme amaçlı arayüzde kalacak)
     min_yeg, max_yeg = float(df_lab['Yogunluk'].min()), float(df_lab['Yogunluk'].max())
     min_por, max_por = float(df_lab['Porozite'].min()), float(df_lab['Porozite'].max())
     min_tebd, max_tebd = float(df_lab['TEBD'].min()), float(df_lab['TEBD'].max())
@@ -66,28 +65,24 @@ else:
 
     if islem == "1. Veri Havuzu ve YSA Eğitimi":
         st.header("🤖 Verileri Birleştirme (3 Girdi) ve Yapay Sinir Ağını Eğitme")
-        st.write("`verriler.txt` dosyasından okunan güncel veri havuzunuz (Yoğunluk, Porozite ve TEBD artık girdidir):")
+        st.write("`verriler.txt` dosyasından okunan güncel veri havuzunuz:")
         st.dataframe(df_lab)
         
         sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin?", min_value=0, max_value=500, value=100)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
-            # 🔥 TEBD parametresi artık girdi listesine (X_list) dahil edildi!
             X_list = list(df_lab[['Yogunluk', 'Porozite', 'TEBD']].values)
-            # Çıktı listesinde (y_list) artık TEBD yok, sadece kalan 5 parametre var
-            y_list = list(df_lab[['P_Hizi', 'S_Hizi', 'Statik_Elastisite', 'Dinamik_Poisson', 'Dinamik_Elastisite']].values)
+            # YSA sadece P_Hizi ve S_Hizi parametrelerini tahmin etmek üzere odaklanıyor
+            y_list = list(df_lab[['P_Hizi', 'S_Hizi']].values)
             
             np.random.seed(42)
             for _ in range(sentetik_adet):
                 rastgele_yogunluk = np.random.uniform(min_yeg, max_yeg)
                 rastgele_porozite = np.random.uniform(min_por, max_por)
-                
                 hesaplanan_cikti = matematiksel_model_veri_uretiyor(rastgele_yogunluk, rastgele_porozite)
                 
-                # Sentetik veride de TEBD girdi tarafına (hesaplanan_cikti[3]) ekleniyor
                 X_list.append([rastgele_yogunluk, rastgele_porozite, hesaplanan_cikti[3]])
-                # Kalan parametreler çıktı havuzuna gidiyor
-                y_list.append([hesaplanan_cikti[0], hesaplanan_cikti[1], hesaplanan_cikti[2], hesaplanan_cikti[4], hesaplanan_cikti[5]])
+                y_list.append([hesaplanan_cikti[0], hesaplanan_cikti[1]])
                 
             X_all = np.array(X_list)
             y_all = np.array(y_list)
@@ -103,12 +98,12 @@ else:
             st.session_state.scaler_X = scaler_X
             st.session_state.scaler_y = scaler_y
             
-            st.success(f"🎉 Başarılı! 3 girdi parametresine dayalı YSA modeli sonsuzluk modunda eğitildi.")
+            st.success(f"🎉 Başarılı! Hız odaklı YSA modeli eğitildi.")
             
             y_pred = scaler_y.inverse_transform(model.predict(X_scaled))
-            param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)', 'Statik Elastisite (MPa)', 'Dinamik Poisson', 'Dinamik Elastisite (MPa)']
+            param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)']
             
-            cols = st.columns(5)
+            cols = st.columns(2)
             for i, ad in enumerate(param_isimleri):
                 r2 = r2_score(y_all[:, i], y_pred[:, i])
                 cols[i].metric(label=ad, value=f"R²: {r2:.4f}")
@@ -119,36 +114,45 @@ else:
         if st.session_state.trained_model is None:
             st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin!")
         else:
-            st.info(f"💡 Bilgi: Model laboratuvar dışındaki ekstrem değerlerde de ucu açık (Sonsuzluk Modu) çalışır.")
-            
             col_in1, col_in2, col_in3 = st.columns(3)
             with col_in1:
                 g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=2.72, format="%.4f")
             with col_in2:
                 g_por = st.number_input("Porozite Değeri girin (%):", value=11.50, format="%.2f")
             with col_in3:
-                # 🔥 Kullanıcı artık TEBD değerini kendisi elle giriyor!
                 g_tebd = st.number_input("TEBD / UCS Değeri girin (MPa):", value=45.00, format="%.2f")
                 
             if st.button("Yapay Zekadan Çıktıları Al"):
-                # Güvenlik duvarı kalktı, doğrudan kullanıcının girdiği 3 parametre ağa besleniyor
                 girdi = np.array([[g_yeg, g_por, g_tebd]])
                 girdi_s = st.session_state.scaler_X.transform(girdi)
                 tahmin_s = st.session_state.trained_model.predict(girdi_s)
                 tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
                 
-                # Fiziksel koruma: Çıktıların tamamen eksiye düşmesi ihtimaline karşı taban koruması
-                tahmin[0] = max(100.0, tahmin[0])
-                tahmin[1] = max(50.0, tahmin[1])
-                tahmin[2] = max(10.0, tahmin[2])
-                tahmin[3] = max(0.01, tahmin[3])
-                tahmin[4] = max(50.0, tahmin[4])
+                v_p = max(500.0, tahmin[0])
+                v_s = max(300.0, tahmin[1])
+                rho = g_yeg * 1000.0 # g/cm3 -> kg/m3 dönüşümü
+                
+                # --- FİZİKSEL FORMÜLLERLE MODÜL HESAPLAMALARI ---
+                # Dinamik Poisson Oranı formülü
+                if (v_p**2 - 2 * v_s**2) != 0 and (2 * (v_p**2 - v_s**2)) != 0:
+                    d_poisson = (v_p**2 - 2 * v_s**2) / (2 * (v_p**2 - v_s**2))
+                else:
+                    d_poisson = 0.25
+                d_poisson = np.clip(d_poisson, 0.05, 0.45)
+                
+                # Dinamik Elastisite Modülü formülü (Pa cinsinden hesaplayıp MPa'ya çeviriyoruz)
+                d_elastisite = (rho * (v_s**2) * (3 * (v_p**2) - 4 * (v_s**2))) / (v_p**2 - v_s**2) / 1000000.0
+                if d_elastisite <= 0 or np.isnan(d_elastisite):
+                    d_elastisite = (rho * v_p**2 * 1000000.0) / 1000000.0 * 0.1 # Fallback
+                
+                # Statik Elastisite Modülü bağıntısı
+                s_elastisite = d_elastisite * 0.15
                 
                 out1, out2 = st.columns(2)
-                out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
-                out2.info(f"**S Hızı:** {tahmin[1]:.2f} m/s")
+                out1.info(f"**P Hızı:** {v_p:.2f} m/s")
+                out2.info(f"**S Hızı:** {v_s:.2f} m/s")
                 
                 out3, out4, out5 = st.columns(3)
-                out3.success(f"**Statik Elastisite Modülü:** {tahmin[2]:.2f} MPa")
-                out4.success(f"**Dinamik Poisson:** {tahmin[3]:.4f}")
-                out5.success(f"**Dinamik Elastisite Modülü:** {tahmin[4]:.2f} MPa")
+                out3.success(f"**Statik Elastisite Modülü:** {s_elastisite:.2f} MPa")
+                out4.success(f"**Dinamik Poisson:** {d_poisson:.4f}")
+                out5.success(f"**Dinamik Elastisite Modülü:** {d_elastisite:.2f} MPa")
