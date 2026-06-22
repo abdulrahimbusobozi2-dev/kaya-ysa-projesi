@@ -23,9 +23,8 @@ st.set_page_config(page_title="YSA Kayaç Modelleme", layout="wide")
 st.title("🌋 Kayaç Özellikleri ve Dalga Yayılımı Tahminleme Aracı")
 st.write("Dokuz Eylül Üniversitesi - Maden Mühendisliği Bölümü Bitirme Projesi")
 
-# --- MÜHENDİSLİK KORUMALI POLİNOMSAL MATEMATİKSEL MODELLER ---
+# --- POLİNOMSAL MATEMATİKSEL MODELLERİNİZ ---
 def matematiksel_model_veri_uretiyor(yogunluk, porozite):
-    # Formül hesaplamaları
     p_hizi_yogunluk = (11086 * (yogunluk**2)) - (60952 * yogunluk) + 86489
     s_hizi_yogunluk = (9087.6 * (yogunluk**2)) - (50269 * yogunluk) + 71034
     tebd_yogunluk = (-180.87 * (yogunluk**2)) + (1137.8 * yogunluk) - 1715.9
@@ -35,7 +34,6 @@ def matematiksel_model_veri_uretiyor(yogunluk, porozite):
     tebd_porozite = (0.8738 * (porozite**2)) - (12.505 * porozite) + 76.576
     dinamik_modul_porozite = (527.47 * (porozite**2)) - (9181 * porozite) + 53622
 
-    # Ortalamalar alınır
     p_hizi = (p_hizi_yogunluk + p_hizi_porozite) / 2
     s_hizi = (s_hizi_yogunluk + s_hizi_porozite) / 2
     tebd = (tebd_yogunluk + tebd_porozite) / 2
@@ -43,13 +41,6 @@ def matematiksel_model_veri_uretiyor(yogunluk, porozite):
     
     statik_elastisite = dinamik_modul * 0.15 
     dinamik_poisson = 0.24
-    
-    # 🔥 MÜHENDİSLİK ZIRHI: Rakamların ekstrem girdilerde negatife veya absürt değerlere düşmesi engellenir
-    p_hizi = max(1500.0, p_hizi)          # Kayaçta P hızı minimum 1500 m/s civarı sınırlandırıldı
-    s_hizi = max(800.0, s_hizi)            # S hızı taban değeri
-    tebd = max(5.0, tebd)                  # TEBD (UCS) asla 5 MPa'ın altına düşemez (En zayıf kayaç koruması)
-    statik_elastisite = max(500.0, statik_elastisite)
-    dinamik_modul = max(1000.0, dinamik_modul)
     
     return [p_hizi, s_hizi, statik_elastisite, tebd, dinamik_poisson, dinamik_modul]
 
@@ -61,7 +52,7 @@ else:
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
-    # Laboratuvar verilerinin sınırlarını hafızaya alıyoruz
+    # Laboratuvar verilerinin sınırlarını net olarak hafızaya alıyoruz
     min_yeg, max_yeg = df_lab['Yogunluk'].min(), df_lab['Yogunluk'].max()
     min_por, max_por = df_lab['Porozite'].min(), df_lab['Porozite'].max()
 
@@ -129,21 +120,17 @@ else:
                 g_por = st.number_input("Porozite Değeri girin (%):", value=11.50, format="%.2f")
                 
             if st.button("Yapay Zekadan Çıktıları Al"):
-                if (g_yeg < min_yeg or g_yeg > max_yeg) or (g_por < min_por or g_por > max_por):
-                    st.toast("ℹ️ Girdi değerleri laboratuvar aralığının dışında. Korumalı ampirik model aktif edildi.")
-                    tahmin = matematiksel_model_veri_uretiyor(g_yeg, g_por)
-                else:
-                    girdi = np.array([[g_yeg, g_por]])
-                    girdi_s = st.session_state.scaler_X.transform(girdi)
-                    tahmin_s = st.session_state.trained_model.predict(girdi_s)
-                    tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
-                    
-                    # Laboratuvar verilerinin içinde bile olsa YSA'nın ufak salınımlarla negatif üretmesi engellenir
-                    tahmin[0] = max(1500.0, tahmin[0])
-                    tahmin[1] = max(800.0, tahmin[1])
-                    tahmin[2] = max(500.0, tahmin[2])
-                    tahmin[3] = max(5.0, tahmin[3])
-                    tahmin[5] = max(1000.0, tahmin[5])
+                # 🔥 AKILLI SINIR KORUMASI: Girdi laboratuvar dışındaysa, değerleri saçmalatmadan en yakın sınıra sabitler
+                klip_yeg = np.clip(g_yeg, min_yeg, max_yeg)
+                klip_por = np.clip(g_por, min_por, max_por)
+                
+                if g_yeg != klip_yeg or g_por != klip_por:
+                    st.toast(f"ℹ️ Girdiler güvenli laboratuvar aralığına ({min_yeg}-{max_yeg} g/cm³, %{min_por}-%{max_por}) sabitlenerek tahmin yapıldı.")
+                
+                girdi = np.array([[klip_yeg, klip_por]])
+                girdi_s = st.session_state.scaler_X.transform(girdi)
+                tahmin_s = st.session_state.trained_model.predict(girdi_s)
+                tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
                 
                 out1, out2, out3 = st.columns(3)
                 out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
