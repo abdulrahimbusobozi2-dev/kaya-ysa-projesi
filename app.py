@@ -52,9 +52,10 @@ else:
     df_lab = pd.read_csv(dosya_adi)
     df_lab.columns = [col.strip().replace("'", "").replace('"', '') for col in df_lab.columns]
     
-    # Gerçek laboratuvar sınırları
+    # Gerçek laboratuvar sınırları (Sadece bilgilendirme amaçlı arayüzde kalacak)
     min_yeg, max_yeg = float(df_lab['Yogunluk'].min()), float(df_lab['Yogunluk'].max())
     min_por, max_por = float(df_lab['Porozite'].min()), float(df_lab['Porozite'].max())
+    min_tebd, max_tebd = float(df_lab['TEBD'].min()), float(df_lab['TEBD'].max())
 
     if 'trained_model' not in st.session_state:
         st.session_state.trained_model = None
@@ -64,15 +65,17 @@ else:
     islem = st.sidebar.radio("İşlem Adımı Seçin:", ["1. Veri Havuzu ve YSA Eğitimi", "2. Eğitilen Ağ ile Tahmin Yap"])
 
     if islem == "1. Veri Havuzu ve YSA Eğitimi":
-        st.header("🤖 Verileri Birleştirme ve Yapay Sinir Ağını Eğitme")
-        st.write("`verriler.txt` dosyasından okunan güncel laboratuvar verileriniz:")
+        st.header("🤖 Verileri Birleştirme (3 Girdi) ve Yapay Sinir Ağını Eğitme")
+        st.write("`verriler.txt` dosyasından okunan güncel veri havuzunuz (Yoğunluk, Porozite ve TEBD artık girdidir):")
         st.dataframe(df_lab)
         
         sentetik_adet = st.number_input("Formüller kullanılarak kaç adet ek sentetik veri üretilip ağa beslensin?", min_value=0, max_value=500, value=100)
         
         if st.button("Verileri Harmanla ve Machine Learning Başlat"):
-            X_list = list(df_lab[['Yogunluk', 'Porozite']].values)
-            y_list = list(df_lab[['P_Hizi', 'S_Hizi', 'Statik_Elastisite', 'TEBD', 'Dinamik_Poisson', 'Dinamik_Elastisite']].values)
+            # 🔥 TEBD parametresi artık girdi listesine (X_list) dahil edildi!
+            X_list = list(df_lab[['Yogunluk', 'Porozite', 'TEBD']].values)
+            # Çıktı listesinde (y_list) artık TEBD yok, sadece kalan 5 parametre var
+            y_list = list(df_lab[['P_Hizi', 'S_Hizi', 'Statik_Elastisite', 'Dinamik_Poisson', 'Dinamik_Elastisite']].values)
             
             np.random.seed(42)
             for _ in range(sentetik_adet):
@@ -80,8 +83,11 @@ else:
                 rastgele_porozite = np.random.uniform(min_por, max_por)
                 
                 hesaplanan_cikti = matematiksel_model_veri_uretiyor(rastgele_yogunluk, rastgele_porozite)
-                X_list.append([rastgele_yogunluk, rastgele_porozite])
-                y_list.append(hesaplanan_cikti)
+                
+                # Sentetik veride de TEBD girdi tarafına (hesaplanan_cikti[3]) ekleniyor
+                X_list.append([rastgele_yogunluk, rastgele_porozite, hesaplanan_cikti[3]])
+                # Kalan parametreler çıktı havuzuna gidiyor
+                y_list.append([hesaplanan_cikti[0], hesaplanan_cikti[1], hesaplanan_cikti[2], hesaplanan_cikti[4], hesaplanan_cikti[5]])
                 
             X_all = np.array(X_list)
             y_all = np.array(y_list)
@@ -97,48 +103,52 @@ else:
             st.session_state.scaler_X = scaler_X
             st.session_state.scaler_y = scaler_y
             
-            st.success(f"🎉 Başarılı! En yüksek kararlılıkta YSA modeli eğitildi.")
+            st.success(f"🎉 Başarılı! 3 girdi parametresine dayalı YSA modeli sonsuzluk modunda eğitildi.")
             
             y_pred = scaler_y.inverse_transform(model.predict(X_scaled))
-            param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)', 'Statik Elastisite (MPa)', 'TEBD (MPa)', 'Dinamik Poisson', 'Dinamik Elastisite (MPa)']
+            param_isimleri = ['P Hızı (m/s)', 'S Hızı (m/s)', 'Statik Elastisite (MPa)', 'Dinamik Poisson', 'Dinamik Elastisite (MPa)']
             
-            cols = st.columns(6)
+            cols = st.columns(5)
             for i, ad in enumerate(param_isimleri):
                 r2 = r2_score(y_all[:, i], y_pred[:, i])
                 cols[i].metric(label=ad, value=f"R²: {r2:.4f}")
 
     elif islem == "2. Eğitilen Ağ ile Tahmin Yap":
-        st.header("🔮 Girdilere Göre Geri Kalan Tüm Verileri Tahmin Etme")
+        st.header("🔮 3 Girdiye Göre Kalan Tüm Mekanik Özellikleri Tahmin Etme")
         
         if st.session_state.trained_model is None:
             st.warning("⚠️ Lütfen önce birinci aşamaya gidip yapay zekayı eğitin!")
         else:
-            # Kullanıcıya güvenli aralığı gösteriyoruz
-            st.info(f"💡 Lütfen sadece laboratuvar güvenli aralığında değerler girin: **Yoğunluk ({min_yeg} - {max_yeg})**, **Porozite ({min_por} - {max_por})**")
+            st.info(f"💡 Bilgi: Model laboratuvar dışındaki ekstrem değerlerde de ucu açık (Sonsuzluk Modu) çalışır.")
             
-            col_in1, col_in2 = st.columns(2)
+            col_in1, col_in2, col_in3 = st.columns(3)
             with col_in1:
                 g_yeg = st.number_input("Yoğunluk Değeri girin (g/cm³):", value=2.72, format="%.4f")
             with col_in2:
                 g_por = st.number_input("Porozite Değeri girin (%):", value=11.50, format="%.2f")
+            with col_in3:
+                # 🔥 Kullanıcı artık TEBD değerini kendisi elle giriyor!
+                g_tebd = st.number_input("TEBD / UCS Değeri girin (MPa):", value=45.00, format="%.2f")
                 
             if st.button("Yapay Zekadan Çıktıları Al"):
-                # 🔥 GÜVENLİK DUVARI KONTROLÜ
-                if (g_yeg < min_yeg or g_yeg > max_yeg) or (g_por < min_por or g_por > max_por):
-                    st.error(f"🚨 Hata! Girilen değerler laboratuvar veri sınırlarının dışındadır. Fiziksel olarak mantıklı tahminler üretebilmek için lütfen Yoğunluğu {min_yeg}-{max_yeg} arası, Poroziteyi %{min_por}-%{max_por} arası giriniz.")
-                else:
-                    # Değerler içerideyse yüksek başarılı yapay zekâ tahmini devrede
-                    girdi = np.array([[g_yeg, g_por]])
-                    girdi_s = st.session_state.scaler_X.transform(girdi)
-                    tahmin_s = st.session_state.trained_model.predict(girdi_s)
-                    tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
-                    
-                    out1, out2, out3 = st.columns(3)
-                    out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
-                    out2.info(f"**S Hızı:** {tahmin[1]:.2f} m/s")
-                    out3.info(f"**Statik Elastisite Modülü:** {tahmin[2]:.2f} MPa")
-                    
-                    out4, out5, out6 = st.columns(3)
-                    out4.success(f"**TEBD (UCS):** {tahmin[3]:.2f} MPa")
-                    out5.success(f"**Dinamik Poisson:** {tahmin[4]:.4f}")
-                    out6.success(f"**Dinamik Elastisite Modülü:** {tahmin[5]:.2f} MPa")
+                # Güvenlik duvarı kalktı, doğrudan kullanıcının girdiği 3 parametre ağa besleniyor
+                girdi = np.array([[g_yeg, g_por, g_tebd]])
+                girdi_s = st.session_state.scaler_X.transform(girdi)
+                tahmin_s = st.session_state.trained_model.predict(girdi_s)
+                tahmin = st.session_state.scaler_y.inverse_transform(tahmin_s)[0]
+                
+                # Fiziksel koruma: Çıktıların tamamen eksiye düşmesi ihtimaline karşı taban koruması
+                tahmin[0] = max(100.0, tahmin[0])
+                tahmin[1] = max(50.0, tahmin[1])
+                tahmin[2] = max(10.0, tahmin[2])
+                tahmin[3] = max(0.01, tahmin[3])
+                tahmin[4] = max(50.0, tahmin[4])
+                
+                out1, out2 = st.columns(2)
+                out1.info(f"**P Hızı:** {tahmin[0]:.2f} m/s")
+                out2.info(f"**S Hızı:** {tahmin[1]:.2f} m/s")
+                
+                out3, out4, out5 = st.columns(3)
+                out3.success(f"**Statik Elastisite Modülü:** {tahmin[2]:.2f} MPa")
+                out4.success(f"**Dinamik Poisson:** {tahmin[3]:.4f}")
+                out5.success(f"**Dinamik Elastisite Modülü:** {tahmin[4]:.2f} MPa")
